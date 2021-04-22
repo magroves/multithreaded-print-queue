@@ -127,7 +127,8 @@ void *producer(void *thread_n) {
         struct node *newNode = (struct node *) malloc(sizeof(struct node));
         newNode->payload = newPrintReq;
         newNode->next = 0;
-        // add newNode to end of list
+
+        // append newNode to end of list
         tail->next = newNode;
         tail = &newNode;
         
@@ -142,6 +143,9 @@ void *producer(void *thread_n) {
         double interval = (double)rand() / (double)RAND_MAX;
         sleep(interval);
     }
+
+    // Now all printRequests have been made, we can flag to consumers production is complete
+    
     pthread_exit(0);
 }
  
@@ -149,7 +153,7 @@ void *consumer(void *thread_n) {
     int thread_numb = *(int *)thread_n;
     int i=0;
 
-    while (1) { 
+    while (1) {    // loop until all requests are processed. use signals?
         sleep(1);
 
         my_wait(&empty_sem);
@@ -158,16 +162,40 @@ void *consumer(void *thread_n) {
 
 
 
-        struct printRequest curr;
+
+        struct node *temp = head;
+        struct node *prev;
+
+        if (temp == NULL) {
+            printf("empty queue\n");
+            exit(0);
+        }
+        // Only one node in List
+        if (head == tail) {
+            free(head);
+            head=NULL;
+        }
+        // iterate list till tail
+        while (temp->next != NULL) {
+            prev = temp;
+            temp = temp->next;
+        }
+
+        // process and remove printJob from queue
+        struct printRequest printJob = temp->payload;
+        free(prev->next);
+        prev->next = NULL;
+        tail = prev;
+
+        printf("Consumer %d dequeue (%d bytes) from buffer\n", thread_numb, printJob.size);
+
 
 
 
         pthread_mutex_unlock(&buffer_mutex);
-        my_post(&full_sem);
         my_post(&shared_sem);
-
-    // printf("Consumer %d dequeue %d (%d bytes) from buffer\n", thread_numb, curr->id ,curr->size);
-   }
+        my_post(&full_sem);
+    }
     pthread_exit(0);
 }
  
@@ -219,15 +247,20 @@ int main(int argc, int **argv) {
 
     }
  
+
     for (i = 0; i < NUM_PRODUCERS; i++)
         pthread_join(prod_thread[i], NULL); 
 
     for (i = 0; i < NUM_CONSUMERS; i++)
         pthread_join(cons_thread[i], NULL);
  
+
+
+
     pthread_mutex_destroy(&buffer_mutex);
     my_destroy(&full_sem);
     my_destroy(&empty_sem);
+    my_destroy(&shared_sem);
  
     return 0;
 }
