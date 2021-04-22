@@ -4,11 +4,13 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdbool.h>
 
 #define SIZE 25  // buffer size (fixed at 25) 
 
 int NUM_CONSUMERS;
 int NUM_PRODUCERS;
+bool flag; // true when producers are done
 
 //TESTING STUFF
 typedef int buffer_t;  
@@ -145,7 +147,7 @@ void *producer(void *thread_n) {
     }
 
     // Now all printRequests have been made, we can flag to consumers production is complete
-    
+    flag = true;
     pthread_exit(0);
 }
  
@@ -153,15 +155,13 @@ void *consumer(void *thread_n) {
     int thread_numb = *(int *)thread_n;
     int i=0;
 
-    while (1) {    // loop until all requests are processed. use signals?
+    while (!flag) {    // loop until all requests are processed. then flag = true
+
         sleep(1);
 
         my_wait(&empty_sem);
         my_wait(&shared_sem);
         pthread_mutex_lock(&buffer_mutex);
-
-
-
 
         struct node *temp = head;
         struct node *prev;
@@ -208,6 +208,9 @@ int main(int argc, int **argv) {
         exit(0);
     }
     
+    // true when producers are finished
+    flag = false;
+
     // recieve number of producers/consumers from command line args
     NUM_PRODUCERS = argv[1];
     NUM_CONSUMERS = argv[2];
@@ -218,9 +221,7 @@ int main(int argc, int **argv) {
     head = &root;
     tail = &root;
     
-
-
-
+    // initialize mutex buffer
     buffer_index = 0;
     pthread_mutex_init(&buffer_mutex, NULL);
 
@@ -249,13 +250,13 @@ int main(int argc, int **argv) {
  
 
     for (i = 0; i < NUM_PRODUCERS; i++)
-        pthread_join(prod_thread[i], NULL); 
+        pthread_join(prod_thread[i], NULL);
+
+    flag = true; // producers are done
 
     for (i = 0; i < NUM_CONSUMERS; i++)
         pthread_join(cons_thread[i], NULL);
  
-
-
 
     pthread_mutex_destroy(&buffer_mutex);
     my_destroy(&full_sem);
