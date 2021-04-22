@@ -1,4 +1,4 @@
-// gcc FCFS.c -lpthread
+// gcc LIFO.c -lpthread
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,7 +132,7 @@ void *producer(void *thread_n) {
 
         // append newNode to end of list
         tail->next = newNode;
-        tail = &newNode;
+        tail = newNode;
         
 
 
@@ -175,7 +175,7 @@ void *consumer(void *thread_n) {
             free(head);
             head=NULL;
         }
-        // iterate list till tail
+        // iterate list to get last element
         while (temp->next != NULL) {
             prev = temp;
             temp = temp->next;
@@ -199,7 +199,7 @@ void *consumer(void *thread_n) {
     pthread_exit(0);
 }
  
-int main(int argc, int **argv) {
+int main(int argc, int *argv[]) {
     srand(time(NULL)); // call once for RNG
 
     // verify arguments exist
@@ -212,14 +212,16 @@ int main(int argc, int **argv) {
     flag = false;
 
     // recieve number of producers/consumers from command line args
-    NUM_PRODUCERS = argv[1];
-    NUM_CONSUMERS = argv[2];
+    NUM_PRODUCERS = atoi(argv[1]);
+    NUM_CONSUMERS = atoi(argv[2]);
+    printf("num_producers: %d\n",NUM_PRODUCERS);
+    printf("num_consumers: %d\n",NUM_CONSUMERS);
     
     // Initialize first node. Set head and tail pointing to it
     struct node *root = (struct node *) malloc(sizeof(struct node));
     root->next = 0;
-    head = &root;
-    tail = &root;
+    head = root;
+    tail = root;
     
     // initialize mutex buffer
     buffer_index = 0;
@@ -265,5 +267,3 @@ int main(int argc, int **argv) {
  
     return 0;
 }
-
-
