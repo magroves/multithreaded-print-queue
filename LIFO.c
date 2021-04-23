@@ -166,15 +166,14 @@ void *producer(void *thread_n) {
     int thread_numb = *(int *)thread_n;
     int numPrintJobs = rand() % 25;
     int i=0;
-    while (i++ < numPrintJobs) { 
-        my_wait(&full_sem); 
-        pthread_mutex_lock(&buffer_mutex);
 
+    while (i++ < numPrintJobs) { 
+        pthread_mutex_lock(&buffer_mutex);
         do {
             pthread_mutex_unlock(&buffer_mutex);
-            my_wait(&full_sem); // sem=0: wait. sem>0: go and decrement it
+            my_wait(&full_sem); // check if queue is full
             pthread_mutex_lock(&buffer_mutex);
-        } while (isfull()); // check for spurios wake-ups
+        } while (isfull()); // check for spurios wake-ups 
         
         insertbuffer(thread_n);
 
@@ -195,15 +194,17 @@ void *producer(void *thread_n) {
 /* CONSUMER */
 void *consumer(void *thread_n) {
     int thread_numb = *(int *)thread_n;
-
     while (!flag) {    // loop until all requests are processed. then flag = true
         sleep(1);
-
-        my_wait(&empty_sem);
-        my_wait(&shared_sem);
         pthread_mutex_lock(&buffer_mutex);
+        do {
+            pthread_mutex_unlock(&buffer_mutex);
+            my_wait(&empty_sem);
+            my_wait(&shared_sem);
+            pthread_mutex_lock(&buffer_mutex);
+        } while (isempty()); //check for spurios wakeups
 
-        dequeuebuffer(thread_n);
+        dequeuebuffer(thread_n);    // consume print job
 
         pthread_mutex_unlock(&buffer_mutex);
         my_post(&shared_sem);
