@@ -7,6 +7,8 @@
 #include <stdbool.h>
 
 #define SIZE 25  // buffer size (fixed at 25) 
+#define TRUE 1
+#define FALSE 0
 
 int NUM_CONSUMERS;
 int NUM_PRODUCERS;
@@ -102,15 +104,26 @@ buffer_t dequeuebuffer() {
     return 0;
 }
  
+int isempty() {
+    if (buffer_index == 0)
+        return TRUE;
+    return FALSE;
+}
+  
+int isfull() {
+    if (buffer_index == SIZE)
+        return TRUE;
+    return FALSE;
+}
 
-
-// user process create print jobs.
-//     -need struct for printRequest
-//     -add pR to global queue
+/* 
+    
+*/
 void *producer(void *thread_n) {
     buffer_t value;//testing
     int thread_numb = *(int *)thread_n;
     int numPrintJobs = rand() % 25;
+
 
 
     int i=0;
@@ -118,7 +131,22 @@ void *producer(void *thread_n) {
 
         my_wait(&full_sem); 
         pthread_mutex_lock(&buffer_mutex);
-  
+
+        do {
+            // cond variables do the unlock/wait and wakeup/lock atomically,
+            // which avoids possible race conditions
+            pthread_mutex_unlock(&buffer_mutex);
+            // cannot go to slepp holding lock
+            sem_wait(&full_sem); // sem=0: wait. sem>0: go and decrement it
+            // there could still be race condition here. another
+            // thread could wake up and aqcuire lock and fill up
+            // buffer. that's why we need to check for spurious wakeups
+            pthread_mutex_lock(&buffer_mutex);
+        } while (isfull()); // check for spurios wake-ups
+        
+
+
+
 
 
         // new PrintRequest with random byte size
@@ -163,6 +191,12 @@ void *consumer(void *thread_n) {
         my_wait(&shared_sem);
         pthread_mutex_lock(&buffer_mutex);
 
+        do {
+            pthread_mutex_unlock(&buffer_mutex);
+            sem_wait(&empty_sem);
+            pthread_mutex_lock(&buffer_mutex);
+        } while (isempty()); //check for spurios wakeups
+        
         struct node *temp = head;
         struct node *prev;
 
