@@ -32,6 +32,7 @@ struct CSem shared_sem; /* prevents reading/writing the same element  */
 
 struct printRequest{
     int size; // in bytes
+    int threadNum;
 };
 
 struct node {
@@ -87,21 +88,65 @@ void my_destroy(struct CSem *cs){
     sem_destroy(&cs->B2);
 }
  
-void insertbuffer(buffer_t value) {
+void insertbuffer(void *thread_n) {
+    int thread_numb = *(int *)thread_n;
+
     if (buffer_index < SIZE) {
-        buffer[buffer_index++] = value;
+        // new PrintRequest with random size (100-1000 bytes)
+        struct printRequest newPrintReq = { (rand() % 1000 + 100), thread_numb };
+
+        // create new node for printRequest
+        struct node *newNode = (struct node *) malloc(sizeof(struct node));
+        newNode->payload = newPrintReq;
+        newNode->next = 0;
+
+        // append newNode to end of list
+        tail->next = newNode;
+        tail = newNode;
+        
+        printf("Producer %d added %d to buffer\n", thread_numb, newNode->payload.size );
+        buffer_index++;
     } else {
         printf("Buffer overflow\n");
     }
 }
  
-buffer_t dequeuebuffer() {
+struct printRequest dequeuebuffer(void *thread_n) {
+    int thread_numb = *(int *)thread_n;
+    struct printRequest printJob; 
     if (buffer_index > 0) {
-        return buffer[--buffer_index]; // buffer_index-- would be error!
+        printf("buffer_index = %d\n", buffer_index);
+
+        struct node *temp = head;
+        struct node *prev;
+
+        if (temp == NULL) {
+            printf("empty queue\n");
+            exit(0);
+        }
+        if (head == tail) { // Only one node in List
+            free(head);
+            head=NULL;
+        }
+        while (temp->next != NULL) { // iterate list until temp = last element
+            prev = temp;
+            temp = temp->next;
+        }
+
+        /* process and remove printJob from queue */
+        printJob = temp->payload;
+        free(prev->next);
+        prev->next = NULL;
+        tail = prev;
+
+        printf("Consumer [%d] dequeue process [%d] (%d bytes) from buffer\n", thread_numb, printJob.threadNum, printJob.size);
+        buffer_index--;
+
     } else {
         printf("Buffer underflow\n");
+        exit(0);
     }
-    return 0;
+    return printJob;
 }
  
 int isempty() {
@@ -116,61 +161,29 @@ int isfull() {
     return FALSE;
 }
 
-/* 
-    
-*/
+/* PRODUCER */
 void *producer(void *thread_n) {
-    buffer_t value;//testing
     int thread_numb = *(int *)thread_n;
     int numPrintJobs = rand() % 25;
-
-
-
     int i=0;
     while (i++ < numPrintJobs) { 
-
         my_wait(&full_sem); 
         pthread_mutex_lock(&buffer_mutex);
 
         do {
-            // cond variables do the unlock/wait and wakeup/lock atomically,
-            // which avoids possible race conditions
             pthread_mutex_unlock(&buffer_mutex);
-            // cannot go to slepp holding lock
-            sem_wait(&full_sem); // sem=0: wait. sem>0: go and decrement it
-            // there could still be race condition here. another
-            // thread could wake up and aqcuire lock and fill up
-            // buffer. that's why we need to check for spurious wakeups
+            my_wait(&full_sem); // sem=0: wait. sem>0: go and decrement it
             pthread_mutex_lock(&buffer_mutex);
         } while (isfull()); // check for spurios wake-ups
         
-
-
-
-
-
-        // new PrintRequest with random byte size
-        int randomByteSize = ( rand() % 1000 + 100 );
-        struct printRequest newPrintReq = {randomByteSize};
-
-        // create new node for printRequest
-        struct node *newNode = (struct node *) malloc(sizeof(struct node));
-        newNode->payload = newPrintReq;
-        newNode->next = 0;
-
-        // append newNode to end of list
-        tail->next = newNode;
-        tail = newNode;
-        
-
+        insertbuffer(thread_n);
 
         pthread_mutex_unlock(&buffer_mutex);
         my_post(&empty_sem); 
 
-        printf("Producer %d added %d to buffer\n", thread_numb, newNode->payload.size );
-
         // delay between succesive print jobs
         double interval = (double)rand() / (double)RAND_MAX;
+        printf("sleeping %f sec...\n\n", interval);
         sleep(interval);
     }
 
@@ -179,52 +192,18 @@ void *producer(void *thread_n) {
     pthread_exit(0);
 }
  
+/* CONSUMER */
 void *consumer(void *thread_n) {
     int thread_numb = *(int *)thread_n;
-    int i=0;
 
     while (!flag) {    // loop until all requests are processed. then flag = true
-
         sleep(1);
 
         my_wait(&empty_sem);
         my_wait(&shared_sem);
         pthread_mutex_lock(&buffer_mutex);
 
-        do {
-            pthread_mutex_unlock(&buffer_mutex);
-            sem_wait(&empty_sem);
-            pthread_mutex_lock(&buffer_mutex);
-        } while (isempty()); //check for spurios wakeups
-        
-        struct node *temp = head;
-        struct node *prev;
-
-        if (temp == NULL) {
-            printf("empty queue\n");
-            exit(0);
-        }
-        // Only one node in List
-        if (head == tail) {
-            free(head);
-            head=NULL;
-        }
-        // iterate list to get last element
-        while (temp->next != NULL) {
-            prev = temp;
-            temp = temp->next;
-        }
-
-        // process and remove printJob from queue
-        struct printRequest printJob = temp->payload;
-        free(prev->next);
-        prev->next = NULL;
-        tail = prev;
-
-        printf("Consumer %d dequeue (%d bytes) from buffer\n", thread_numb, printJob.size);
-
-
-
+        dequeuebuffer(thread_n);
 
         pthread_mutex_unlock(&buffer_mutex);
         my_post(&shared_sem);
@@ -251,7 +230,7 @@ int main(int argc, int *argv[]) {
     printf("num_producers: %d\n",NUM_PRODUCERS);
     printf("num_consumers: %d\n",NUM_CONSUMERS);
     
-    // Initialize first node. Set head and tail pointing to it
+    // initialize first node. Set head and tail pointing to it
     struct node *root = (struct node *) malloc(sizeof(struct node));
     root->next = 0;
     head = root;
@@ -266,7 +245,7 @@ int main(int argc, int *argv[]) {
     my_init(&empty_sem, 0);
     my_init(&shared_sem, NUM_CONSUMERS);
 
-    // Setup producer processes and consumer threads
+    // Create producer and consumer threads
     pthread_t prod_thread[NUM_PRODUCERS];
     int prod_thread_numb[NUM_PRODUCERS];
     int i;
@@ -274,26 +253,26 @@ int main(int argc, int *argv[]) {
         prod_thread_numb[i] = i;
         pthread_create(prod_thread + i,  NULL,  producer,  prod_thread_numb + i);  
     }
-
     pthread_t cons_thread[NUM_CONSUMERS];
     int cons_thread_numb[NUM_CONSUMERS];
     for(i=0; i<NUM_CONSUMERS; i++) {
         cons_thread_numb[i] = i;
-        // playing a bit with thread and thread_numb pointers...
         pthread_create(&cons_thread[i], NULL, consumer, &cons_thread_numb[i]);  
 
     }
  
-
+    // join producer threads
     for (i = 0; i < NUM_PRODUCERS; i++)
         pthread_join(prod_thread[i], NULL);
+    
+    flag = true;  // signal producers are finished
 
-    flag = true; // producers are done
-
+    // join consumer threads
     for (i = 0; i < NUM_CONSUMERS; i++)
         pthread_join(cons_thread[i], NULL);
  
 
+    // deallocate semaphores and mutexbuffer
     pthread_mutex_destroy(&buffer_mutex);
     my_destroy(&full_sem);
     my_destroy(&empty_sem);
